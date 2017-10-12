@@ -19,9 +19,13 @@
 #include <sys/shm.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <pthread.h>  
+#include <pthread.h>
 #include <string.h>
 
+char *g_pIPString = "192.168.18.243";
+char *g_pUseName = "admin";
+char *g_pPASSWD = "admin";
+long g_lPort = 5000;
 //#define KDK_DEBUG
 #define ServerPort 6000						//服务器端口号
 #define ListenPort 6000						//本机侦听端口
@@ -46,7 +50,7 @@ pthread_mutex_t mutex;
 typedef struct clientInfo {
 	char kind;				//CMD_Kind(Media/Picture)
 	char runCode[32];		//Client runtimeCode
-	struct sockaddr addr; 	//Client_Addr			
+	struct sockaddr addr; 	//Client_Addr
 };
 
 struct clientInfo *clientList;				//多有客户端缓存信息
@@ -266,6 +270,7 @@ void rcvGETRTC(char *buff)
 //接收到用户获取连续画面请求
 void rcvGETFRM(char *buff, struct sockaddr *addr)
 {
+	printf("RECEIVE GETFRM => %s\n", buff);
 	//GETFRM-RuntimeCode1-RuntimeCode2
 #ifdef KDK_DEBUG
 	printf("RECEIVE GETFRM => %s\n", buff);
@@ -289,6 +294,8 @@ void rcvSTPFRM(char *buff)
 //接收到用户停止获取连续画面请求
 void rcvGETPIC(char *buff, struct sockaddr *addr)
 {
+	printf("RECEIVE GETPIC => %s\n", buff);
+
 	//GETPIC-RuntimeCode1-RuntimeCode2
 #ifdef KDK_DEBUG
 	printf("RECEIVE GETPIC => %s\n", buff);
@@ -298,40 +305,149 @@ void rcvGETPIC(char *buff, struct sockaddr *addr)
 	if (idx >= 0)
 		clientList[idx].kind = 'P';
 	else
-		addClient('P', &buff[6], addr);
+	addClient('P', &buff[6], addr);
+}
+void MycommandSet(HANDLE hServer, unsigned int nCtrlCmd, unsigned char speed1, unsigned char speed2)
+{
+	PAN_CTRL		stPANCtrl;
+	ERR_CODE		errCode;
+
+	/* 通道 0， 串口0 */
+	stPANCtrl.ChannelNo = 0;
+	stPANCtrl.COMMNo = 0;
+	stPANCtrl.PanType = 0xff;
+	stPANCtrl.PanCmd = nCtrlCmd;
+	stPANCtrl.Data1 = speed1;
+	stPANCtrl.Data2 = speed2;
+
+	/* 云台控制函数 */
+	errCode = NET_SetServerConfig(
+		hServer,
+		CMD_SET_PAN_CTRL,
+		(char *)&stPANCtrl,
+		sizeof(PAN_CTRL),
+		0);
+
+	if (errCode)
+	{
+		printf("Control PTZ failed!\n");
+	}
 }
 //接收到用户PTZ控制命令请求
 void rcvSETPTZ(char *buff)
 {
+	ERR_CODE		errCode;
+	HANDLE 			m_hLogonServer;
+	char			dwHoriSpeed;
+	char			dwVeriSpeed;
+	char			ch;
 	//SETPTZ-RuntimeCode1-RuntimeCode2-PTZ-Param
 #ifdef KDK_DEBUG
 	printf("RECEIVE SETPTZ => %s\n", buff);
 #endif
+	errCode = NET_LogonServer(g_pIPString, g_lPort, "admin", g_pUseName, g_pPASSWD, 0, &m_hLogonServer);
+	printf("--->|\tNET_LogonServer: %s\n", errCode ? "Failed!" : "Successful!");
 	if (strncmp(runtimeCode, &buff[38], 32) != 0) return;
+	dwHoriSpeed = buff[71];
+	dwVeriSpeed = buff[72];
 	int cmd = buff[70];
 	switch (cmd)
 	{
-	case 1:	//	1	向前移动	速度，延时	以多快的速度移动云台多长时间
+	case 1:
+		MycommandSet(m_hLogonServer, YT_UP, dwHoriSpeed, dwVeriSpeed);
 		break;
-	case 2:	//	2	向后移动	速度，延时	以多快的速度移动云台多长时间
+	case 2:
+		MycommandSet(m_hLogonServer, YT_DOWN, dwHoriSpeed, dwVeriSpeed);
 		break;
-	case 3:	//	3	顺时针移动	速度，延时	以多快的速度移动云台多长时间
+	case 3:
+		MycommandSet(m_hLogonServer, YT_LEFT, dwHoriSpeed, dwVeriSpeed);
 		break;
-	case 4:	//	4	逆时针移动	速度，延时	以多快的速度移动云台多长时间
+	case 4:
+		MycommandSet(m_hLogonServer, YT_RIGHT, dwHoriSpeed, dwVeriSpeed);
 		break;
-	case 5:	//	5	1、3组合	移动速度，旋转速度，延时
+	case 5:
+		MycommandSet(m_hLogonServer, YT_FOCUSADD, dwHoriSpeed, dwVeriSpeed);
 		break;
-	case 6:	//	6	1、4组合	移动速度，旋转速度，延时
+	case 6:
+		MycommandSet(m_hLogonServer, YT_FOCUSSUB, dwHoriSpeed, dwVeriSpeed);
 		break;
-	case 7:	//	7	2、3组合	移动速度，旋转速度，延时
+	case 7:
+		MycommandSet(m_hLogonServer, YT_IRISADD, dwHoriSpeed, dwVeriSpeed);
 		break;
-	case 8:	//	8	2、4组合	移动速度，旋转速度，延时
+	case 8:
+		MycommandSet(m_hLogonServer, YT_IRISSUB, dwHoriSpeed, dwVeriSpeed);
 		break;
-	case 9:	//	9	打开夜视	0：关闭，1：打开
+	case 9:
+		MycommandSet(m_hLogonServer, YT_ZOOMADD, dwHoriSpeed, dwVeriSpeed);
 		break;
-	case 10://	10	推 - 聚焦	速度，延时
+	case 10:
+		MycommandSet(m_hLogonServer, YT_ZOOMSUB, dwHoriSpeed, dwVeriSpeed);
 		break;
-	case 11://	11	拉 - 聚焦	速度，延时
+	case 11:
+		MycommandSet(m_hLogonServer, YT_AUTOOPEN, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 12:
+		MycommandSet(m_hLogonServer, YT_AUTOCLOSE, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 13:
+		MycommandSet(m_hLogonServer, YT_LAMPOPEN, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 14:
+		MycommandSet(m_hLogonServer, YT_LAMPCLOSE, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 15:
+		MycommandSet(m_hLogonServer, YT_BRUSHOPEN, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 16:
+		MycommandSet(m_hLogonServer, YT_BRUSHCLOSE, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 17:
+		MycommandSet(m_hLogonServer, YT_WATEROPEN, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 18:
+		MycommandSet(m_hLogonServer, YT_WATERCLOSE, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 19:
+		MycommandSet(m_hLogonServer, YT_PRESET, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 20:
+		MycommandSet(m_hLogonServer, YT_CALL, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 21:
+		MycommandSet(m_hLogonServer, YT_STOP, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 30:
+		MycommandSet(m_hLogonServer, YT_UP_STOP, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 31:
+		MycommandSet(m_hLogonServer, YT_DOWN_STOP, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 32:
+		MycommandSet(m_hLogonServer, YT_LEFT_STOP, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 33:
+		MycommandSet(m_hLogonServer, YT_RIGHT_STOP, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 34:
+		MycommandSet(m_hLogonServer, YT_FOCUSADD_STOP, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 35:
+		MycommandSet(m_hLogonServer, YT_FOCUSSUB_STOP, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 36:
+		MycommandSet(m_hLogonServer, YT_IRISADD_STOP, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 37:
+		MycommandSet(m_hLogonServer, YT_IRISSUB_STOP, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 38:
+		MycommandSet(m_hLogonServer, YT_ZOOMADD_STOP, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 39:
+		MycommandSet(m_hLogonServer, YT_ZOOMSUB_STOP, dwHoriSpeed, dwVeriSpeed);
+		break;
+	case 70:
+		MycommandSet(m_hLogonServer, YT_PRESET_DEL, dwHoriSpeed, dwVeriSpeed);
 		break;
 	}
 }
@@ -341,8 +457,8 @@ void rcvCNTUSR(char *buff)
 	//CNTUSR-sockaddr_in -> LNKUSR-Runtimecode
 #ifdef KDK_DEBUG
 	printf("RECEIVE CNTUSR => %s\n", buff);
-#endif	
-	struct sockaddr_in clientAddr;				//服务器通讯地址信息	
+#endif
+	struct sockaddr_in clientAddr;				//服务器通讯地址信息
 	char sendbuff[38];
 	memcpy(sendbuff, "LNKUSR", 6);;
 	memcpy(&sendbuff[6], runtimeCode, 32);
@@ -450,7 +566,27 @@ void insiderSender(void *arg)
 	int sendCount = dataSize / buffsize + 1;
 	char *sendBuff = (char*)malloc(buffsize + 13);
 	frameIdx++;
+	int i;
+	for (i = 0; i < *clientCount; i++) {
+		if (clientList[i].kind == 'P')
+		{
+			char Buff[dataSize+6+512];
+			FRAME_HEAD	*pFrameHead = (FRAME_HEAD *)mediaData;
+			if(FRAME_FLAG_VI == pFrameHead->streamFlag)
+			{
+			memcpy(Buff,"GETPIC",6);
+			Buff[6] = 'F';
+			Buff[7] = 'X';
+			Buff[8] = 'V';
+			Buff[9] = 'T';
+			memcpy(&Buff[518], mediaData, dataSize);
+			sendto(insiderSocket, Buff, dataSize +6, 0, (struct sockaddr*)&clientList[i].addr, sizeof(struct sockaddr));
+			printf("datasize =%d\n",dataSize);
+			deleteClient(i);
+			}
+		}
 
+	}
 	struct timeval tv1;
 	struct timeval tv2;
 	int cost;
@@ -467,7 +603,7 @@ void insiderSender(void *arg)
 		memcpy(&sendBuff[13], &mediaData[position], bufLen);
 		int i;
 		for (i = 0; i < *clientCount; i++) {
-			if (clientList[i].kind = 'M')
+			if (clientList[i].kind =='M')
 			{
 				sendto(insiderSocket, sendBuff, bufLen + 13, 0, (struct sockaddr*)&clientList[i].addr, sizeof(struct sockaddr));
 				//printf("SEND Frame %ld/%ld bytes on %ld ---->", sendBuff, mediaSize, tv1.tv_usec);
@@ -484,12 +620,12 @@ void insiderSender(void *arg)
 	}
 	memcpy(sendBuff, "ENDFRM", 6);
 	memcpy(&sendBuff[6], &frameIdx, 1);
-	int i;
 	for (i = 0; i < *clientCount; i++) {
-		if (clientList[i].kind = 'M')
+		if (clientList[i].kind == 'M')
 		{
 			sendto(insiderSocket, sendBuff, 7, 0, (struct sockaddr*)&clientList[i].addr, sizeof(struct sockaddr));
 		}
+
 	}
 #ifdef KDK_DEBUG
 	printf("SEND Frame over on %d\n", tv2.tv_usec);
@@ -589,7 +725,7 @@ int main()
 	}
 	runtimeCode = shmat(shmRTCid, 0, 0);
 	memset(runtimeCode, '0', 32);
-	
+
 	int shmLLSTid;
 	if ((shmLLSTid = shmget(IPC_PRIVATE, 5 * sizeof(struct clientInfo), 0666 | IPC_CREAT)) < 0)
 	{
@@ -597,7 +733,7 @@ int main()
 		exit(EXIT_FAILURE);
 	}
 	clientList = shmat(shmLLSTid, 0, 0);
-	
+
 	int shmCNTid;
 	if ((shmCNTid = shmget(IPC_PRIVATE, sizeof(int), 0666 | IPC_CREAT)) < 0)
 	{
@@ -606,7 +742,7 @@ int main()
 	}
 	clientCount = (int*)shmat(shmCNTid, 0, 0);
 	*clientCount = 0;
-	
+
 	int shmSYSid;
 	if ((shmSYSid = shmget(IPC_PRIVATE, sizeof(int), 0666 | IPC_CREAT)) < 0)
 	{
@@ -615,7 +751,7 @@ int main()
 	}
 	sysFlag = (int*)shmat(shmSYSid, 0, 0);
 	*sysFlag = 1;
-	
+
 	//int shmMediaDataid1;
 	//if ((shmMediaDataid1 = shmget(IPC_PRIVATE, 40000, 0666 | IPC_CREAT)) < 0)
 	//{
@@ -637,7 +773,7 @@ int main()
 	//	exit(EXIT_FAILURE);
 	//}
 	//mediaData[2] = (BYTE*)shmat(shmMediaDataid3, 0, 0);//流媒体数据
-	
+
 	//int mediaSizeid;
 	//if ((mediaSizeid = shmget(IPC_PRIVATE, sizeof(int), 0666 | IPC_CREAT)) < 0)
 	//{
@@ -775,13 +911,13 @@ int main()
 	userNmae=netconfig.DdnsName;
 	userPWD=netconfig.DdnsPass;
 
-	struct hostent *he = gethostbyname(netconfig.DdnsIP);
-	memcpy(&serverAddr.sin_addr, he->h_addr, sizeof(struct in_addr));
+	//struct hostent *he = gethostbyname(netconfig.DdnsIP);
+	//memcpy(&serverAddr.sin_addr, he->h_addr, sizeof(struct in_addr));
 	serverAddr.sin_family=AF_INET;
 	serverAddr.sin_port = htons(netconfig.DdnsPortNo);
-	
-	//serverAddr.sin_port = htons(4999);
-	//serverAddr.sin_addr.s_addr=inet_addr("192.168.18.22");
+
+	serverAddr.sin_port = htons(4999);
+	serverAddr.sin_addr.s_addr=inet_addr("192.168.18.9");
 	printf("port=%d\n",netconfig.DdnsPortNo);
 	printf("userName=%s,userPWd=%s\n",userNmae,userPWD);
 	printf("ddns=%s\n",netconfig.DdnsIP);
@@ -813,7 +949,7 @@ int main()
 	OPEN_CHANNEL_INFO_EX channelInfo;
 	channelInfo.dwClientID = 1;
 	channelInfo.nOpenChannel = 0;
-	channelInfo.nSubChannel = 1;
+	channelInfo.nSubChannel = 0;
 	channelInfo.protocolType = (NET_PROTOCOL_TYPE)0;
 	channelInfo.funcStreamCallback = (ChannelStreamCallback)insiderCallBack;
 	channelInfo.pCallbackContext = 0;
@@ -827,7 +963,7 @@ int main()
 	}
 
 	printf("Start *************************/\n");
-   pthread_mutex_init(&mutex,NULL);  
+   pthread_mutex_init(&mutex,NULL);
 	//启动心跳进程——insiderHeartbeat
 	int pid1;
 	if ((pid1 = fork()) == 0)
@@ -849,6 +985,6 @@ int main()
 	//}
 	getchar();
 	*sysFlag = 0;
-  pthread_mutex_destroy(&mutex);  
+  pthread_mutex_destroy(&mutex);
 	printf("End of program.\n");
 }
